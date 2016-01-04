@@ -65,7 +65,7 @@ func TestStaticAsPost(t *testing.T) {
 func TestStaticBadDir(t *testing.T) {
 	response := httptest.NewRecorder()
 
-	n := Classic()
+	n := New()
 	n.UseHandler(http.NotFoundHandler())
 
 	req, err := http.NewRequest("GET", "http://localhost:3000/negroni.go", nil)

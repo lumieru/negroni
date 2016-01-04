@@ -48,25 +48,13 @@ func Wrap(handler http.Handler) Handler {
 // the Use and UseHandler methods.
 type Negroni struct {
 	middleware middleware
-	handlers   []Handler
 }
 
 // New returns a new Negroni instance with no middleware preconfigured.
 func New(handlers ...Handler) *Negroni {
 	return &Negroni{
-		handlers:   handlers,
 		middleware: build(handlers),
 	}
-}
-
-// Classic returns a new Negroni instance with the default middleware already
-// in the stack.
-//
-// Recovery - Panic Recovery Middleware
-// Logger - Request/Response Logging
-// Static - Static File Serving
-func Classic() *Negroni {
-	return New(NewRecovery(), NewLogger(), NewStatic(http.Dir("public")))
 }
 
 func (n *Negroni) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
@@ -75,8 +63,7 @@ func (n *Negroni) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 // Use adds a Handler onto the middleware stack. Handlers are invoked in the order they are added to a Negroni.
 func (n *Negroni) Use(handler Handler) {
-	n.handlers = append(n.handlers, handler)
-	n.middleware = build(n.handlers)
+	appendMiddleware(&(n.middleware), handler)
 }
 
 // UseFunc adds a Negroni-style handler function onto the middleware stack.
@@ -104,7 +91,15 @@ func (n *Negroni) Run(addr string) {
 
 // Returns a list of all the handlers in the current Negroni middleware chain.
 func (n *Negroni) Handlers() []Handler {
-	return n.handlers
+	var handlers []Handler
+
+	curr := &(n.middleware)
+	for !isVoidMiddleware(curr) {
+		handlers = append(handlers, curr.handler)
+		curr = curr.next
+	}
+
+	return handlers
 }
 
 func build(handlers []Handler) middleware {
@@ -121,9 +116,39 @@ func build(handlers []Handler) middleware {
 	return middleware{handlers[0], &next}
 }
 
+func appendMiddleware(m *middleware, h Handler) {
+	var pre *middleware
+	curr := m
+	for !isVoidMiddleware(curr) {
+		pre = curr
+		curr = curr.next
+	}
+
+	if pre == nil {
+		m.handler = h
+		next := voidMiddleware()
+		m.next = &next
+	} else {
+		pre.next = &middleware{h, curr}
+	}
+}
+
 func voidMiddleware() middleware {
 	return middleware{
 		HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {}),
 		&middleware{},
+	}
+}
+
+func isVoidMiddleware(m *middleware) bool {
+	if m != nil {
+		next := m.next
+		if next.handler == nil && next.next == nil {
+			return true
+		} else {
+			return false
+		}
+	} else {
+		return false
 	}
 }
