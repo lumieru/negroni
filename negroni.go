@@ -4,20 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"golang.org/x/net/context"
 )
-
-// ContextHandler is a http handler interface with context
-type ContextHandler interface {
-	ServeHTTPC(ctx context.Context, rw http.ResponseWriter, r *http.Request)
-}
-
-// ContextHandlerFunc is a function that implements ContextHandler
-type ContextHandlerFunc func(ctx context.Context, rw http.ResponseWriter, r *http.Request)
-
-func (chf ContextHandlerFunc) ServeHTTPC(ctx context.Context, rw http.ResponseWriter, r *http.Request) {
-	chf(ctx, rw, r)
-}
 
 // Handler handler is an interface that objects can implement to be registered to serve as middleware
 // in the Negroni middleware stack.
@@ -26,15 +13,15 @@ func (chf ContextHandlerFunc) ServeHTTPC(ctx context.Context, rw http.ResponseWr
 //
 // If the Handler writes to the ResponseWriter, the next http.HandlerFunc should not be invoked.
 type Handler interface {
-	ServeHTTP(ctx context.Context, rw http.ResponseWriter, r *http.Request, next ContextHandlerFunc)
+	ServeHTTP(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc)
 }
 
 // HandlerFunc is an adapter to allow the use of ordinary functions as Negroni handlers.
 // If f is a function with the appropriate signature, HandlerFunc(f) is a Handler object that calls f.
-type HandlerFunc func(ctx context.Context, rw http.ResponseWriter, r *http.Request, next ContextHandlerFunc)
+type HandlerFunc func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc)
 
-func (h HandlerFunc) ServeHTTP(ctx context.Context, rw http.ResponseWriter, r *http.Request, next ContextHandlerFunc) {
-	h(ctx, rw, r, next)
+func (h HandlerFunc) ServeHTTP(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	h(rw, r, next)
 }
 
 type middleware struct {
@@ -42,29 +29,17 @@ type middleware struct {
 	next    *middleware
 }
 
-func (m middleware) ServeHTTPC(ctx context.Context, rw http.ResponseWriter, r *http.Request) {
-	m.handler.ServeHTTP(ctx, rw, r, m.next.ServeHTTPC)
+func (m middleware) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+	m.handler.ServeHTTP(rw, r, m.next.ServeHTTP)
 }
 
 // Wrap converts a http.Handler into a negroni.Handler so it can be used as a Negroni
 // middleware. The next http.HandlerFunc is automatically called after the Handler
 // is executed.
 func Wrap(handler http.Handler) Handler {
-	return HandlerFunc(func(ctx context.Context, rw http.ResponseWriter, r *http.Request, next ContextHandlerFunc) {
+	return HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 		handler.ServeHTTP(rw, r)
-		next(ctx, rw, r)
-	})
-}
-
-// WrapCH converts a negroni.ContextHandler into a negroni.Handler so it can be used as a Negroni
-// middleware. The next negroni.ContextHandlerFunc is automatically called after the Handler
-// is executed.
-// IMPORTANT!! handler should read ctx only, and should not write to ctx. Anything write to ctx will
-// not pass to the next ContextHandlerFunc
-func WrapCH(handler ContextHandler) Handler {
-	return HandlerFunc(func(ctx context.Context, rw http.ResponseWriter, r *http.Request, next ContextHandlerFunc) {
-		handler.ServeHTTPC(ctx, rw, r)
-		next(ctx, rw, r)
+		next(rw, r)
 	})
 }
 
@@ -83,11 +58,7 @@ func New(handlers ...Handler) *Negroni {
 }
 
 func (n *Negroni) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	n.middleware.ServeHTTPC(context.Background(), NewResponseWriter(rw), r)
-}
-
-func (n *Negroni) ServeHTTPC(ctx context.Context, rw http.ResponseWriter, r *http.Request) {
-	n.middleware.ServeHTTPC(ctx, NewResponseWriter(rw), r)
+	n.middleware.ServeHTTP(NewResponseWriter(rw), r)
 }
 
 // Use adds a Handler onto the middleware stack. Handlers are invoked in the order they are added to a Negroni.
@@ -96,7 +67,7 @@ func (n *Negroni) Use(handler Handler) {
 }
 
 // UseFunc adds a Negroni-style handler function onto the middleware stack.
-func (n *Negroni) UseFunc(handlerFunc func(ctx context.Context, rw http.ResponseWriter, r *http.Request, next ContextHandlerFunc)) {
+func (n *Negroni) UseFunc(handlerFunc func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc)) {
 	n.Use(HandlerFunc(handlerFunc))
 }
 
@@ -108,16 +79,6 @@ func (n *Negroni) UseHandler(handler http.Handler) {
 // UseHandler adds a http.HandlerFunc-style handler function onto the middleware stack.
 func (n *Negroni) UseHandlerFunc(handlerFunc func(rw http.ResponseWriter, r *http.Request)) {
 	n.UseHandler(http.HandlerFunc(handlerFunc))
-}
-
-// UseHandler adds a negeroni.ContextHandler onto the middleware stack. Handlers are invoked in the order they are added to a Negroni.
-func (n *Negroni) UseContextHandler(handler ContextHandler) {
-	n.Use(WrapCH(handler))
-}
-
-// UseHandler adds a negeroni.ContextHandlerFunc-style handler function onto the middleware stack.
-func (n *Negroni) UseContextHandlerFunc(handlerFunc func(ctx context.Context, rw http.ResponseWriter, r *http.Request)) {
-	n.UseContextHandler(ContextHandlerFunc(handlerFunc))
 }
 
 // Run is a convenience function that runs the negroni stack as an HTTP
@@ -174,7 +135,7 @@ func appendMiddleware(m *middleware, h Handler) {
 
 func voidMiddleware() middleware {
 	return middleware{
-		HandlerFunc(func(ctx context.Context, rw http.ResponseWriter, r *http.Request, next ContextHandlerFunc) {}),
+		HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {}),
 		&middleware{},
 	}
 }
