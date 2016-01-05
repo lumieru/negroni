@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+	"golang.org/x/net/context"
 )
 
 /* Test Helpers */
@@ -25,29 +26,62 @@ func TestNegroniRun(t *testing.T) {
 	go New().Run(":3000")
 }
 
+type ContextKey int
+
+const (
+	KEY_1	ContextKey = 1
+	KEY_2	ContextKey = 2
+)
+
 func TestNegroniServeHTTP(t *testing.T) {
 	result := ""
 	response := httptest.NewRecorder()
 
 	n := New()
-	n.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n.Use(HandlerFunc(func(ctx context.Context, rw http.ResponseWriter, r *http.Request, next ContextHandlerFunc) {
 		result += "foo"
-		next(rw, r)
+		ctx = context.WithValue(ctx, KEY_1, "key1")
+		next(ctx, rw, r)
+		expect(t, ctx.Value(KEY_2), nil)
 		result += "ban"
 	}))
-	n.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n.UseFunc(func(ctx context.Context, rw http.ResponseWriter, r *http.Request, next ContextHandlerFunc) {
 		result += "bar"
-		next(rw, r)
+		result += ctx.Value(KEY_1).(string)
+		ctx = context.WithValue(ctx, KEY_2, "key2")
+		next(ctx, rw, r)
 		result += "baz"
+	})
+	n.UseHandler(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request){
+		result += "-UseHandler+"
 	}))
-	n.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n.UseHandlerFunc(func(rw http.ResponseWriter, r *http.Request){
+		result += "-UseHandlerFunc+"
+	})
+	n.UseContextHandler(ContextHandlerFunc(func(ctx context.Context, rw http.ResponseWriter, r *http.Request){
+		result += "-UseContextHandler+"
+		result += ctx.Value(KEY_1).(string) + ctx.Value(KEY_2).(string)
+	}))
+	n.UseContextHandlerFunc(func(ctx context.Context, rw http.ResponseWriter, r *http.Request){
+		result += "-UseContextHandlerFunc+"
+		result += ctx.Value(KEY_1).(string) + ctx.Value(KEY_2).(string)
+	})
+	n.Use(HandlerFunc(func(ctx context.Context, rw http.ResponseWriter, r *http.Request, next ContextHandlerFunc) {
 		result += "bat"
+		result += ctx.Value(KEY_1).(string) + ctx.Value(KEY_2).(string)
 		rw.WriteHeader(http.StatusBadRequest)
 	}))
 
 	n.ServeHTTP(response, (*http.Request)(nil))
 
-	expect(t, result, "foobarbatbazban")
+	expect(t, result, "foobarkey1-UseHandler+-UseHandlerFunc+-UseContextHandler+key1key2-UseContextHandlerFunc+key1key2batkey1key2bazban")
+	expect(t, response.Code, http.StatusBadRequest)
+
+	result = "test2"
+	response = httptest.NewRecorder()
+
+	n.ServeHTTPC(context.Background(), response, (*http.Request)(nil))
+	expect(t, result, "test2foobarkey1-UseHandler+-UseHandlerFunc+-UseContextHandler+key1key2-UseContextHandlerFunc+key1key2batkey1key2bazban")
 	expect(t, response.Code, http.StatusBadRequest)
 }
 
@@ -59,7 +93,7 @@ func TestHandlers(t *testing.T) {
 	handlers := n.Handlers()
 	expect(t, 0, len(handlers))
 
-	n.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n.Use(HandlerFunc(func(ctx context.Context, rw http.ResponseWriter, r *http.Request, next ContextHandlerFunc) {
 		rw.WriteHeader(http.StatusOK)
 	}))
 
@@ -70,6 +104,6 @@ func TestHandlers(t *testing.T) {
 
 	// Ensures that the first handler that is in sequence behaves
 	// exactly the same as the one that was registered earlier
-	handlers[0].ServeHTTP(response, (*http.Request)(nil), nil)
+	handlers[0].ServeHTTP(context.TODO(), response, (*http.Request)(nil), nil)
 	expect(t, response.Code, http.StatusOK)
 }
