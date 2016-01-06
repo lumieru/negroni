@@ -35,20 +35,43 @@ func TestNegroniServeHTTP(t *testing.T) {
 		next(rw, r)
 		result += "ban"
 	}))
-	n.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n.UseFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 		result += "bar"
 		next(rw, r)
 		result += "baz"
+	})
+	n.UseHandler(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		result += "UseHandler"
 	}))
-	n.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	n.UseHandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		result += "bat"
 		rw.WriteHeader(http.StatusBadRequest)
-	}))
+	})
 
 	n.ServeHTTP(response, (*http.Request)(nil))
 
-	expect(t, result, "foobarbatbazban")
+	expect(t, result, "foobarUseHandlerbatbazban")
 	expect(t, response.Code, http.StatusBadRequest)
+}
+
+func TestServeHTTPResponseWriter(t *testing.T) {
+	response := httptest.NewRecorder()
+
+	n := New()
+	n.Use(HandlerFunc(func(rw http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+		if prw, ok := rw.(*responseWriter); ok {
+			if _, ok := prw.ResponseWriter.(ResponseWriter); ok {
+				t.Errorf("%s: prw.ResponseWriter should not be ResponseWriter.", r.URL.String())
+			}
+		} else {
+			t.Errorf("%s: rw should be *responseWriter.", r.URL.String())
+		}
+	}))
+
+	req, _ := http.NewRequest("GET", "http://http.ResponseWriter", nil)
+	n.ServeHTTP(response, req)
+	req2, _ := http.NewRequest("GET", "http://negroni.ResponseWriter", nil)
+	n.ServeHTTP(NewResponseWriter(response), req2)
 }
 
 // Ensures that a Negroni middleware chain 

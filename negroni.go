@@ -58,7 +58,13 @@ func New(handlers ...Handler) *Negroni {
 }
 
 func (n *Negroni) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	n.middleware.ServeHTTP(NewResponseWriter(rw), r)
+	var nrw ResponseWriter
+	if orw, ok := rw.(ResponseWriter); ok {
+		nrw = orw
+	} else {
+		nrw = NewResponseWriter(rw)
+	}
+	n.middleware.ServeHTTP(nrw, r)
 }
 
 // Use adds a Handler onto the middleware stack. Handlers are invoked in the order they are added to a Negroni.
